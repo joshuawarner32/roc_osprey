@@ -1,29 +1,20 @@
-import requests
 import hashlib
 import sqlite3
 from datetime import datetime, timedelta
 import base64
 import os
-from dotenv import load_dotenv
 import time
 import threading
+from dotenv import load_dotenv
+from urllib.parse import urlparse
+from github import Github
 
 # Load environment variables
 load_dotenv()
 
-# GitHub API configuration
-GITHUB_API_TOKEN = os.getenv('GITHUB_API_TOKEN')
-GITHUB_API_URL = 'https://api.github.com'
-HEADERS = {
-    'Authorization': f'token {GITHUB_API_TOKEN}',
-    'Accept': 'application/vnd.github.v3+json'
-}
-
 # Database configuration
 DB_NAME = 'roc_corpus.db'
 
-# Rate limiting configuration
-RATE_LIMIT_SLEEP = int(os.getenv('RATE_LIMIT_SLEEP', 60))
 class Db:
     def __init__(self, db_name):
         self.conn = sqlite3.connect(db_name)
@@ -38,12 +29,6 @@ class Db:
             return True
         return False
 
-    def add_repo(self, repo_url):
-        with self.lock:
-            self.c.execute('INSERT OR IGNORE INTO known_repos (repo_url) VALUES (?)', (repo_url,))
-            if self._should_commit():
-                self.conn.commit()
-
     def add_file(self, file_hash, commit_sha, file_contents, repo_url, file_path):
         with self.lock:
             self.c.execute('''INSERT INTO roc_files (file_hash, commit_sha, retrieval_date, file_contents, repo_url, file_path)
@@ -54,7 +39,7 @@ class Db:
 
     def update_repo_scan_results(self, repo_url, scan_results):
         with self.lock:
-            self.c.execute('INSERT INTO known_repo_scan_results (repo_url, scan_date, scan_results) VALUES (?, ?, ?)',
+            self.c.execute('INSERT INTO repo_scan_results (repo_url, scan_date, scan_results) VALUES (?, ?, ?)',
                           (repo_url, datetime.now().isoformat(), scan_results))
             if self._should_commit():
                 self.conn.commit()
@@ -67,7 +52,7 @@ class Db:
 
     def get_repo_scan_info(self, repo_url):
         with self.lock:
-            self.c.execute('SELECT scan_date, scan_results FROM known_repo_scan_results WHERE repo_url=? ORDER BY scan_date DESC LIMIT 1', (repo_url,))
+            self.c.execute('SELECT scan_date, scan_results FROM repo_scan_results WHERE repo_url=? ORDER BY scan_date DESC LIMIT 1', (repo_url,))
             result = self.c.fetchone()
         return result
 
@@ -85,10 +70,7 @@ def create_db():
                   file_contents TEXT,
                   repo_url TEXT,
                   file_path TEXT)''')
-    db.c.execute('''CREATE TABLE IF NOT EXISTS known_repos
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  repo_url TEXT UNIQUE)''')
-    db.c.execute('''CREATE TABLE IF NOT EXISTS known_repo_scan_results
+    db.c.execute('''CREATE TABLE IF NOT EXISTS repo_scan_results
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   repo_url TEXT,
                   scan_date TEXT,
@@ -105,33 +87,18 @@ def get_repo_scan_info(db, repo_url):
 def update_repo_scan_info(db, repo_url, scan_results):
     db.update_repo_scan_results(repo_url, scan_results)
 
-def scan_repo(repo_url):
-    headers = {'Authorization': f'token {GITHUB_API_TOKEN}'}
+def scan_repo(github, repo_url):
     repo_owner, repo_name = repo_url.split('/')[-2:]
 
-    # First, get the default branch
-    repo_api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}'
-    response = requests.get(repo_api_url, headers=headers)
+    # Get the default branch
+    repo_info = github.get(f'repos/{repo_owner}/{repo_name}')
+    default_branch = repo_info.get('default_branch', 'main')
+    print(f"Default branch: {default_branch}")
 
-    if response.status_code == 200:
-        default_branch = response.json().get('default_branch', 'main')
-        print(f"Default branch: {default_branch}")
-
-        # Now, fetch the file tree using the default branch
-        api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/git/trees/{default_branch}?recursive=1'
-        print(f"Requesting {api_url}")
-
-        response = requests.get(api_url, headers=headers)
-        if response.status_code == 200:
-            files = response.json().get('tree', [])
-            roc_files = [file for file in files if file['path'].endswith('.roc')]
-            return roc_files
-        else:
-            print(f"Failed to fetch file tree for repo {repo_url}: {response.status_code}")
-            return []
-    else:
-        print(f"Failed to fetch repo {repo_url}: {response.status_code}")
-        return []
+    # Fetch the file tree using the default branch
+    files = github.get(f'repos/{repo_owner}/{repo_name}/git/trees/{default_branch}?recursive=1')
+    roc_files = [file for file in files['tree'] if file['path'].endswith('.roc')]
+    return roc_files
 
 def insert_roc_files(db, repo_url, roc_files):
     if not roc_files:
@@ -151,58 +118,42 @@ def should_scan_repo(last_scan_date, scan_results):
         return False
     return True
 
-def search_roc_files():
+def search_roc_files(github):
     query = 'extension:roc -repo:roc-lang/roc'
-    url = f'{GITHUB_API_URL}/search/code?q={query}&per_page=100'
     items = []
-    while url:
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 403 and 'X-RateLimit-Reset' in response.headers:
-            reset_time = int(response.headers['X-RateLimit-Reset'])
-            sleep_time = max(reset_time - time.time(), RATE_LIMIT_SLEEP)
-            print(f"Rate limit exceeded. Sleeping for {sleep_time} seconds.")
-            time.sleep(sleep_time)
-            continue
-        elif response.status_code != 200:
-            response.raise_for_status()
-
-        data = response.json()
-        items.extend(data.get('items', []))
-        url = data.get('next', None)
-
-        remaining = response.headers.get('X-RateLimit-Remaining')
-        reset_time = response.headers.get('X-RateLimit-Reset')
-        if remaining and reset_time:
-            reset_time = datetime.fromtimestamp(int(reset_time))
-            print(f"Requests remaining: {remaining}, Reset time: {reset_time}")
-
+    page = 1
+    while True:
+        result = github.get(f'search/code?q={query}&per_page=100&page={page}')
+        items.extend(result['items'])
+        if 'next' not in result:
+            break
+        page += 1
     return items
 
-def get_file_content(url):
-    response = requests.get(url, headers=HEADERS)
-    content = response.json()['content']
+def get_file_content(github, url):
+    file_info = github.get_prefixed(url)
+    content = file_info['content']
     return base64.b64decode(content).decode('utf-8')
 
-def store_file(db, file_hash, commit_sha, file_contents, repo_url, file_path):
-    db.add_file(file_hash, commit_sha, file_contents, repo_url, file_path)
-
-def explore_via_search(db):
-    roc_files = search_roc_files()
+def explore_via_search(db, github):
+    roc_files = search_roc_files(github)
     for item in roc_files:
         file_url = item['url']
         commit_sha = item['sha']
         repo_url = item['repository']['html_url']
         file_path = item['path']
 
-        file_contents = get_file_content(file_url)
+        file_contents = get_file_content(github, file_url)
         file_hash = hashlib.sha256(file_contents.encode('utf-8')).hexdigest()
 
-        store_file(db, file_hash, commit_sha, file_contents, repo_url, file_path)
+        db.add_file(file_hash, commit_sha, file_contents, repo_url, file_path)
         print(f"Stored file: {item['repository']['full_name']} {file_path}")
 
-def explore_via_known_repos(db):
+def explore_via_known_repos(db, github):
     repo_urls = get_existing_repo_urls(db)
+    explore_repos(db, github, repo_urls)
 
+def explore_repos(db, github, repo_urls):
     for repo_url in repo_urls:
         scan_info = get_repo_scan_info(db, repo_url)
         if scan_info:
@@ -211,19 +162,55 @@ def explore_via_known_repos(db):
             last_scan_date, scan_results = None, 0
 
         if should_scan_repo(last_scan_date, scan_results):
-            roc_files = scan_repo(repo_url)
-            insert_roc_files(db, repo_url, roc_files)
-            update_repo_scan_info(db, repo_url, len(roc_files))
+            try:
+                roc_files = scan_repo(github, repo_url)
+                insert_roc_files(db, repo_url, roc_files)
+                update_repo_scan_info(db, repo_url, len(roc_files))
+            except Exception as e:
+                print(f"Error scanning repository {repo_url}: {e}")
+
+def explore_via_known_users(db, github):
+    repo_urls = get_existing_repo_urls(db)
+    users = set()
+
+    for repo_url in repo_urls:
+        try:
+            parsed_url = urlparse(repo_url)
+            assert parsed_url.netloc == 'github.com'
+            user = parsed_url.path.split('/')[1]
+            users.add(user)
+        except Exception as e:
+            print(f"Error parsing repo URL {repo_url}: {e}")
+
+    repo_urls = set()
+    print("Unique users from known repositories:")
+    for user in sorted(users):
+        print(user)
+        try:
+            page = 1
+            while True:
+                repos = github.get(f'users/{user}/repos?per_page=100&page={page}')
+                if not repos:
+                    break
+                for repo in repos:
+                    # print(f"  - {repo['full_name']}")
+                    repo_urls.add(repo['html_url'])
+                page += 1
+        except Exception as e:
+            print(f"Error fetching repos for user {user}: {e}")
+
+    explore_repos(db, github, repo_urls)
 
 def main():
     create_db()
     db = Db(DB_NAME)
+    github = Github()
 
     try:
-        # explore_via_search(db)
-        explore_via_known_repos(db)
+        explore_via_search(db, github)
+        explore_via_known_repos(db, github)
+        explore_via_known_users(db, github)
     finally:
-        db.commit()
         db.close()
 
 if __name__ == '__main__':

@@ -4,13 +4,13 @@ import sqlite3
 from datetime import datetime, timedelta
 import base64
 import os
+import json
 import time
 import threading
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-
 class Github:
     def __init__(self):
         self.api_token = os.getenv('GITHUB_API_TOKEN')
@@ -21,47 +21,41 @@ class Github:
         self.api_url = 'https://api.github.com'
         self.db_name = 'githubcache.db'
         self.rate_limit_sleep = int(os.getenv('RATE_LIMIT_SLEEP', 60))
+        self.conn = sqlite3.connect(self.db_name, check_same_thread=False)
         self._create_db()
         self.lock = threading.Lock()
 
     def _create_db(self):
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''CREATE TABLE IF NOT EXISTS api_cache
-                              (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                               url TEXT UNIQUE,
-                               response TEXT,
-                               timestamp DATETIME)''')
-            conn.commit()
+        cursor = self.conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS api_cache
+                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                           url TEXT UNIQUE,
+                           response TEXT,
+                           timestamp DATETIME)''')
+        self.conn.commit()
 
     def _is_cache_valid(self, timestamp):
         now = datetime.now()
         cache_time = datetime.fromisoformat(timestamp)
         return (now - cache_time) < timedelta(hours=24)
 
-    def _get_cached_response(self, url):
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT response, timestamp FROM api_cache WHERE url = ?', (url,))
-            result = cursor.fetchone()
-            if result and self._is_cache_valid(result[1]):
-                return result[0]
-        return None
-
     def _cache_response(self, url, response):
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''INSERT OR REPLACE INTO api_cache (url, response, timestamp)
-                              VALUES (?, ?, ?)''', (url, response, datetime.now().isoformat()))
-            conn.commit()
+        cursor = self.conn.cursor()
+        cursor.execute('''INSERT OR REPLACE INTO api_cache (url, response, timestamp)
+                          VALUES (?, ?, ?)''', (url, response, datetime.now().isoformat()))
+        self.conn.commit()
 
-    def _request(self, method, url, **kwargs):
-        response = self._get_cached_response(url)
-        if response:
-            return response
+    def _request(self, method, url):
+        print(f"Checking cache for {url}")
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT response, timestamp FROM api_cache WHERE url = ?', (url,))
+        result = cursor.fetchone()
+        if result and self._is_cache_valid(result[1]):
+            return json.loads(result[0])
 
         while True:
-            res = requests.request(method, url, headers=self.headers, **kwargs)
+            print(f"Requesting {url}")
+            res = requests.request(method, url, headers=self.headers)
             if res.status_code == 403 and 'X-RateLimit-Reset' in res.headers:
                 reset_time = int(res.headers['X-RateLimit-Reset'])
                 sleep_time = max(reset_time - time.time(), self.rate_limit_sleep)
@@ -71,16 +65,13 @@ class Github:
             elif res.status_code != 200:
                 res.raise_for_status()
 
-            response = res.text
-            self._cache_response(url, response)
-            return response
+            self._cache_response(url, res.text)
+            return res.json()
 
-    def get(self, endpoint, **kwargs):
+    def get(self, endpoint):
         url = f'{self.api_url}/{endpoint}'
-        return self._request('GET', url, **kwargs)
+        return self._request('GET', url)
 
-# Usage example
-if __name__ == '__main__':
-    github = Github()
-    response = github.get('repos/octocat/hello-world')
-    print(response)
+    def get_prefixed(self, url):
+        assert url.startswith(self.api_url)
+        return self._request('GET', url)
