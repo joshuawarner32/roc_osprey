@@ -207,7 +207,7 @@ fn main() -> Result<()> {
                         contents, output, error, fmt_output, reparse_output, reparse_error,
                         normalized_output, normalized_reparse_output, double_fmt_output,
                         fmt_changed, fmt_changed_syntax, fmt_idempotent
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                     params![
                         repo_url,
                         file_path,
@@ -250,7 +250,6 @@ fn main() -> Result<()> {
 
             for row in file_paths_iter {
                 let (repo_url, file_path) = row?;
-                println!("Diffing file: {} {}", repo_url, file_path);
 
                 let result_a: Option<ParseData> = conn_results_a
                     .query_row(
