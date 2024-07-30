@@ -165,6 +165,8 @@ fn main() -> Result<()> {
             conn_results.execute(
                 "CREATE TABLE IF NOT EXISTS roc_parse_results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    repo_url TEXT,
+                    file_path TEXT,
                     contents TEXT,
                     output TEXT,
                     error TEXT,
@@ -201,11 +203,14 @@ fn main() -> Result<()> {
 
                 transaction.execute(
                     "INSERT INTO roc_parse_results (
+                        repo_url, file_path,
                         contents, output, error, fmt_output, reparse_output, reparse_error,
                         normalized_output, normalized_reparse_output, double_fmt_output,
                         fmt_changed, fmt_changed_syntax, fmt_idempotent
                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                     params![
+                        repo_url,
+                        file_path,
                         file_content,
                         result.output,
                         result.error,
@@ -253,8 +258,8 @@ fn main() -> Result<()> {
                         normalized_output, normalized_reparse_output, double_fmt_output,
                         fmt_changed, fmt_changed_syntax, fmt_idempotent
                      FROM roc_parse_results
-                     WHERE contents = ?1",
-                        params![repo_url.clone() + &file_path],
+                     WHERE repo_url = ?1 and file_path = ?2",
+                        params![&repo_url, &file_path],
                         |row| {
                             Ok(ParseData {
                                 output: row.get(1)?,
@@ -279,8 +284,8 @@ fn main() -> Result<()> {
                         normalized_output, normalized_reparse_output, double_fmt_output,
                         fmt_changed, fmt_changed_syntax, fmt_idempotent
                      FROM roc_parse_results
-                     WHERE contents = ?1",
-                        params![repo_url.clone() + &file_path],
+                     WHERE repo_url = ?1 and file_path = ?2",
+                        params![&repo_url, &file_path],
                         |row| {
                             Ok(ParseData {
                                 output: row.get(1)?,
@@ -301,19 +306,44 @@ fn main() -> Result<()> {
 
                 match (result_a, result_b) {
                     (Some(a), Some(b)) => {
-                        if a.output != b.output
-                            || a.error != b.error
-                            || a.fmt_output != b.fmt_output
-                            || a.reparse_output != b.reparse_output
-                            || a.reparse_error != b.reparse_error
-                            || a.normalized_output != b.normalized_output
-                            || a.normalized_reparse_output != b.normalized_reparse_output
-                            || a.double_fmt_output != b.double_fmt_output
-                            || a.fmt_changed != b.fmt_changed
-                            || a.fmt_changed_syntax != b.fmt_changed_syntax
-                            || a.fmt_idempotent != b.fmt_idempotent
-                        {
-                            println!("Differences found for file: {} {}", repo_url, file_path);
+                        let mut differences = Vec::new();
+
+                        if a.output != b.output {
+                            differences.push("output");
+                        }
+                        if a.error != b.error {
+                            differences.push("error");
+                        }
+                        if a.fmt_output != b.fmt_output {
+                            differences.push("fmt_output");
+                        }
+                        if a.reparse_output != b.reparse_output {
+                            differences.push("reparse_output");
+                        }
+                        if a.reparse_error != b.reparse_error {
+                            differences.push("reparse_error");
+                        }
+                        if a.normalized_output != b.normalized_output {
+                            differences.push("normalized_output");
+                        }
+                        if a.normalized_reparse_output != b.normalized_reparse_output {
+                            differences.push("normalized_reparse_output");
+                        }
+                        if a.double_fmt_output != b.double_fmt_output {
+                            differences.push("double_fmt_output");
+                        }
+                        if a.fmt_changed != b.fmt_changed {
+                            differences.push("fmt_changed");
+                        }
+                        if a.fmt_changed_syntax != b.fmt_changed_syntax {
+                            differences.push("fmt_changed_syntax");
+                        }
+                        if a.fmt_idempotent != b.fmt_idempotent {
+                            differences.push("fmt_idempotent");
+                        }
+
+                        if !differences.is_empty() {
+                            println!("{} {}: {}", repo_url, file_path, differences.join(", "));
                         }
                     }
                     _ => println!("No results found for file: {} {}", repo_url, file_path),
