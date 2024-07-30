@@ -37,7 +37,7 @@ class Github:
     def _is_cache_valid(self, timestamp):
         now = datetime.now()
         cache_time = datetime.fromisoformat(timestamp)
-        return (now - cache_time) < timedelta(hours=24)
+        return (now - cache_time) < timedelta(hours=48)
 
     def _cache_response(self, url, response):
         cursor = self.conn.cursor()
@@ -56,14 +56,26 @@ class Github:
         while True:
             print(f"Requesting {url}")
             res = requests.request(method, url, headers=self.headers)
-            if res.status_code == 403 and 'X-RateLimit-Reset' in res.headers:
-                reset_time = int(res.headers['X-RateLimit-Reset'])
-                sleep_time = max(reset_time - time.time(), self.rate_limit_sleep)
-                print(f"Rate limit exceeded. Sleeping for {sleep_time} seconds.")
-                time.sleep(sleep_time)
+            try:
+                if res.status_code == 403 and 'X-RateLimit-Reset' in res.headers:
+                    reset_time = int(res.headers['X-RateLimit-Reset'])
+                    sleep_time = max(reset_time - time.time(), self.rate_limit_sleep)
+                    print(f"Rate limit exceeded. Sleeping for {sleep_time} seconds.")
+                    for remaining in range(int(sleep_time), 0, -1):
+                        print(f"\033[K\rSleeping for {remaining} seconds... ", end='', flush=True)
+                        time.sleep(1)
+                    print("\rSleeping complete. Resuming requests.")
+                    continue
+                elif res.status_code != 200:
+                    res.raise_for_status()
+            except requests.exceptions.ConnectionError as e:
+                print(f"Connection error: {e}. Retrying...")
+                time.sleep(5)
                 continue
-            elif res.status_code != 200:
-                res.raise_for_status()
+            except ConnectionResetError as e:
+                print(f"Connection reset error: {e}. Retrying...")
+                time.sleep(5)
+                continue
 
             self._cache_response(url, res.text)
             return res.json()
