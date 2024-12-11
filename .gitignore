@@ -1,4 +1,6 @@
 .env
+.zuliprc
 *.db
 *.db.old
 target/
+Cargo.lock

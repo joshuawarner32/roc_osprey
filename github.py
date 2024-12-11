@@ -55,8 +55,8 @@ class Github:
 
         while True:
             print(f"Requesting {url}")
-            res = requests.request(method, url, headers=self.headers)
             try:
+                res = requests.request(method, url, headers=self.headers, timeout=10)
                 if res.status_code == 403 and 'X-RateLimit-Reset' in res.headers:
                     reset_time = int(res.headers['X-RateLimit-Reset'])
                     sleep_time = max(reset_time - time.time(), self.rate_limit_sleep)
@@ -74,6 +74,10 @@ class Github:
                 continue
             except ConnectionResetError as e:
                 print(f"Connection reset error: {e}. Retrying...")
+                time.sleep(5)
+                continue
+            except requests.exceptions.Timeout as e:
+                print(f"Timeout error: {e}. Retrying...")
                 time.sleep(5)
                 continue
 
