@@ -1,9 +1,8 @@
 use bumpalo::Bump;
 use roc_fmt::annotation::Formattable;
-use roc_fmt::module::fmt_module;
 use roc_fmt::Buf;
 use roc_parse::{
-    ast::Defs, module::parse_module_defs, parser::Parser, remove_spaces::RemoveSpaces, state::State,
+    ast::Defs, header::parse_module_defs, normalize::Normalize, parser::Parser, state::State,
 };
 use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection, Result};
@@ -34,7 +33,7 @@ struct Output<'a> {
     module_defs: Defs<'a>,
 }
 
-impl<'a> RemoveSpaces<'a> for Output<'a> {
+impl<'a> Normalize<'a> for Output<'a> {
     fn remove_spaces(&self, arena: &'a Bump) -> Self {
         Output {
             header: self.header.remove_spaces(arena),

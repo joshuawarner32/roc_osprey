@@ -1,0 +1,11 @@
+[package]
+name = "roc_syntax_adapter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+roc_parse = { path = "../../../../roc-lang/roc/crates/compiler/parse" }
+roc_fmt = { path = "../../../../roc-lang/roc/crates/compiler/fmt" }
+roc_region = { path = "../../../../roc-lang/roc/crates/compiler/region" }
+test_syntax = { path = "../../../../roc-lang/roc/crates/compiler/test_syntax" }
+bumpalo = { version = "3.12.0", features = ["collections"] }
