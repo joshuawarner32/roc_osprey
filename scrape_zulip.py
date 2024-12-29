@@ -107,7 +107,7 @@ with sqlite3.connect('zulip_code_blocks.db') as conn:
 
                 for message in messages:
                     content = message["content"]
-                    if "```" in content or "code" in content or "pre" in content:
+                    if "```" in content or "code" in content or "pre" in content or "github.com" in content:
                         conn.execute('''
                             INSERT OR REPLACE INTO messages (channel, message_id, content) VALUES (?, ?, ?)
                         ''', (sub["name"], message["id"], content))
