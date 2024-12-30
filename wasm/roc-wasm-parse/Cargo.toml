@@ -18,8 +18,8 @@ wasm-bindgen = "0.2.84"
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
-roc_parse = { path = "../../../../roc-lang/roc/crates/compiler/parse" }
-roc_fmt = { path = "../../../../roc-lang/roc/crates/compiler/fmt" }
+roc_parse = { path = "roc/crates/compiler/parse" }
+roc_fmt = { path = "roc/crates/compiler/fmt" }
 bumpalo = { version = "3.12.0", features = ["collections"] }
 
 [dev-dependencies]
