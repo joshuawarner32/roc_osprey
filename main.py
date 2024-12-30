@@ -9,6 +9,20 @@ app, rt = fast_app()
 # Database connection
 db = database("roc_corpus.db")
 
+VALID_STATIC_FILES = {
+    "roc_wasm_parse_bg.wasm",
+    "roc_wasm_parse_bg.wasm.d.ts",
+    "roc_wasm_parse.d.ts",
+    "roc_wasm_parse.js",
+}
+
+@rt("/static/{filename:path}")
+def static(filename: str):
+    if filename in VALID_STATIC_FILES:
+        return FileResponse(f'/home/wwwpython/osprey/wasm/roc-wasm-parse/pkg/{filename}')
+    else:
+        return Response("Not Found", status_code=404)
+
 # Define the route for the homepage
 @rt("/")
 def get_home():
