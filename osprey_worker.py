@@ -1,6 +1,13 @@
 import time
+import osprey
 
 while True:
-    # sleep for 30 seconds
     print("I'm running!")
-    time.sleep(30)
+
+    try:
+        osprey.main()
+    except Exception as e:
+        print(f"Error running osprey: {e}")
+
+    # sleep for 1 hour
+    time.sleep(60 * 60)
