@@ -4,3 +4,5 @@
 *.db.old
 target/
 Cargo.lock
+__pycache__
+.sesskey
