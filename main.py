@@ -115,60 +115,84 @@ def get_roc_files():
             Td(row["retrieval_date"]),
             Td(row["length"]),
             Td(row["repo_url"]),
+            # syncing emjoi unicode
+            Td("🔄" if row["length"] > 0 else "❌"),
             Td(row["file_path"])
         )
         for row in rows
     ]
     table = Table(
         Tr(
-            Th("ID", onclick="sortTable(0)"),
-            Th("Retrieval Date", onclick="sortTable(1)"),
-            Th("Length", onclick="sortTable(2)"),
-            Th("Repo URL", onclick="sortTable(3)"),
-            Th("File Path", onclick="sortTable(4)")
+            Th("ID"),
+            Th("Retrieval Date"),
+            Th("Length"),
+            Th("Repo URL"),
+            Th("Parse Result"),
+            Th("File Path")
         ),
         id="rocTable",
         *table_rows,
     )
     js = """
-    function sortTable(n) {
-        var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
-        table = document.getElementById("rocTable");
-        switching = true;
-        dir = "asc";
-        while (switching) {
-            switching = false;
-            rows = table.rows;
-            for (i = 1; i < (rows.length - 1); i++) {
-                shouldSwitch = false;
-                x = rows[i].getElementsByTagName("TD")[n];
-                y = rows[i + 1].getElementsByTagName("TD")[n];
-                if (dir == "asc") {
-                    if (x.innerHTML.toLowerCase() > y.innerHTML.toLowerCase()) {
-                        shouldSwitch = true;
-                        break;
+    import init, { parse_and_debug } from '/static/roc_wasm_parse.js';
+
+    let parser_ready = (async () => {
+      // Initialize the WASM module (this fetches and instantiates the .wasm file)
+      await init();
+    })();
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const rows = document.querySelectorAll("#rocTable tr");
+
+        parser_ready.then(() => {
+            const observer = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                    const row = entry.target;
+                    let parseResultCell = null;
+                    let idCell = null;
+
+                    // Manually iterate over the cells to find the relevant nodes
+                    const cells = row.getElementsByTagName("td");
+                    for (let i = 0; i < cells.length; i++) {
+                        if (i === 4) {
+                            parseResultCell = cells[i];
+                        } else if (i === 0) {
+                            const links = cells[i].getElementsByTagName("a");
+                            if (links.length > 0) {
+                                idCell = links[0];
+                            }
+                        }
                     }
-                } else if (dir == "desc") {
-                    if (x.innerHTML.toLowerCase() < y.innerHTML.toLowerCase()) {
-                        shouldSwitch = true;
-                        break;
+
+                    if (parseResultCell && parseResultCell.textContent === "🔄") {
+                        const id = idCell ? idCell.textContent : null;
+
+                        if (id) {
+                            fetch(`/content/${id}`)
+                                .then(response => response.text())
+                                .then(roc_code => {
+                                    let result = parse_and_debug(roc_code);
+                                    if (result.startsWith("Full {")) {
+                                        parseResultCell.textContent = "✅";
+                                    } else {
+                                        // red circle emoji
+                                        parseResultCell.textContent = "🔴";
+                                    }
+                                })
+                                .catch(error => console.error("Error parsing file:", error));
+                            }
+                        }
+                        observer.unobserve(row);
                     }
-                }
-            }
-            if (shouldSwitch) {
-                rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
-                switching = true;
-                switchcount++;
-            } else {
-                if (switchcount == 0 && dir == "asc") {
-                    dir = "desc";
-                    switching = true;
-                }
-            }
-        }
-    }
+                });
+            });
+
+            rows.forEach(row => observer.observe(row));
+        });
+    });
     """
-    return Titled("ROC Files", table, Script(code=js))
+    return Titled("ROC Files", table, Script(code=js, type="module"))
 
 # Define the route to view a single `roc_files` entry
 @rt("/files/{id}")
@@ -258,6 +282,15 @@ def columns(header, left, right):
         style = "display: flex; flex-direction: column; height: 100vh;"
     )
 
+@rt("/content/{id}")
+def get_content(id: int):
+    try:
+        row = db.q(f"SELECT file_contents FROM roc_files WHERE id = {id}")[0]
+    except NotFoundError:
+        return Titled("Error", P("ROC File not found"))
+
+    return Response(row["file_contents"], media_type="text/plain")
+
 
 # Define the route to list `repo_scan_results`
 @rt("/repo_scan_results")
@@ -288,7 +321,6 @@ def get_repo_scan_results():
     )
 
     return Titled("Repo Scan Results", table)
-
 
 # Define the route to view a single `repo_scan_results` entry
 @rt("/repo_scan_results/{id}")
