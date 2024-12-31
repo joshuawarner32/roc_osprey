@@ -47,14 +47,6 @@ body {
     transition: height 0.3s;
 }
 
-#left-column,
-#right-column {
-    flex: 1;
-    overflow-y: scroll;
-    height: 100vh;
-    padding: 10px;
-}
-
 #left-column {
     background-color: #f4f4f4;
 }
@@ -261,7 +253,7 @@ def columns(header, left, right):
                 id="right-column",
                 style="flex: 1; overflow-y: auto; padding: 20px;"
             ),
-            style="display: flex; flex: 1;"
+            style="display: flex; flex: 1; overflow: hidden;"
         ),
         style = "display: flex; flex-direction: column; height: 100vh;"
     )
