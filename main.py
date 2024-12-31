@@ -1,5 +1,7 @@
 from fasthtml.common import *
 from fastlite import database, NotFoundError
+import tarfile
+import io
 
 # Initialize the FastHTML app
 app = FastHTML()
@@ -290,6 +292,23 @@ def get_content(id: int):
         return Titled("Error", P("ROC File not found"))
 
     return Response(row["file_contents"], media_type="text/plain")
+
+@rt("/tarball")
+def get_tarball():
+    # Create a tarball (.tar.gz) of all the ROC files
+    # The path of each item is the repo url (stripping https://) and the file path concatenated
+    # The contents of each item is the file contents
+    # Do this in memory and return the tarball as a response
+    tarball = io.BytesIO()
+    with tarfile.open(fileobj=tarball, mode="w:gz") as tar:
+        for row in db.q("SELECT * FROM roc_files"):
+            tarinfo = tarfile.TarInfo(f"{row['repo_url'][8:]}/{row['file_path']}")
+            tarinfo.size = len(row["file_contents"])
+            tar.addfile(tarinfo, io.BytesIO(row["file_contents"].encode("utf-8")))
+
+    tarball.seek(0)
+    return Response(tarball.read(), media_type="application/gzip", headers={"Content-Disposition": "attachment; filename=roc_files.tar.gz"})
+
 
 
 # Define the route to list `repo_scan_results`
