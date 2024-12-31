@@ -112,7 +112,11 @@ def get_home():
 # Define the route to list `roc_files`
 @rt("/files")
 def get_roc_files():
-    rows = db.q(f"SELECT id, retrieval_date, length(file_contents) as length, repo_url, file_path FROM roc_files")
+    rows = db.q(f"""
+    SELECT id, retrieval_date, length(file_contents) as length, repo_url, file_path
+    FROM roc_files
+    WHERE not (repo_url like '%/roc')
+    """)
     table_rows = [
         Tr(
             Td(A(f"{row["id"]}", href=f"/files/{row["id"]}")),
