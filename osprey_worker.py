@@ -9,5 +9,5 @@ while True:
     except Exception as e:
         print(f"Error running osprey: {e}")
 
-    # sleep for 1 hour
-    time.sleep(60 * 60)
+    # sleep for 24 hours
+    time.sleep(24 * 60 * 60)

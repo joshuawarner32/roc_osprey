@@ -29,10 +29,10 @@ body {
 }
 
 #header-style {
+    flex-shrink: 0;
     background-color: #333;
     color: white;
     padding: 10px;
-    cursor: pointer;
 }
 
 #header.collapsed {
@@ -220,8 +220,8 @@ def get_roc_file(id: int):
     """
 
 
-    header = Titled(
-        f"ROC File ID: {row["id"]}",
+    header = Div(
+        H1(f"ROC File ID: {row["id"]}"),
         Ul(
             Li(f"File Hash: {row["file_hash"]}"),
             Li(f"Commit SHA: {row["commit_sha"]}"),
@@ -234,7 +234,9 @@ def get_roc_file(id: int):
     left = Pre(Code(row["file_contents"], id="roc_code"))
     right = Pre(id="parse_output")
 
-    return Div(
+    title = Title(f"ROC File ID: {row['id']}")
+
+    return title, Main(
         css,
         columns(header, left, right),
         Script(type='module', code=js),
@@ -245,30 +247,56 @@ def columns(header, left, right):
         Div(
             Div(header, id="header"),
             Button("Toggle Header", id="toggle-header"),
-            id="header-style"
+            style = "flex-shrink: 0; background-color: #333; color: white;"
         ),
         Button("Toggle Right Column", id="toggle-right"),
         Div(
             Div(
                 left,
-                id="left-column"
+                id="left-column",
+                style="flex: 1; overflow-y: auto; padding: 20px;"
             ),
             Div(
                 right,
-                id="right-column"
+                id="right-column",
+                style="flex: 1; overflow-y: auto; padding: 20px;"
             ),
-            id="container"
-        )
+            style="display: flex; flex: 1;"
+        ),
+        style = "display: flex; flex-direction: column; height: 100vh;"
     )
+
 
 # Define the route to list `repo_scan_results`
 @rt("/repo_scan_results")
 def get_repo_scan_results():
-    items = [
-        Li(A(f"{row.id}: {row.repo_url}", href=f"/repo_scan_results/{row.id}"))
-        for row in repo_scan_results.all()
+    repo_scan_results = db.q("""
+    SELECT id, repo_url, max(scan_date) as last_scan_date, group_concat(distinct scan_results) as scan_results
+    FROM repo_scan_results
+    group by repo_url
+    """)
+    table_rows = [
+        Tr(
+            Td(A(f"{row['id']}", href=f"/repo_scan_results/{row['id']}")),
+            Td(row["repo_url"]),
+            Td(row["last_scan_date"]),
+            Td(", ".join(row["scan_results"]))
+        )
+        for row in repo_scan_results
     ]
-    return Titled("Repo Scan Results", Ul(*items))
+    table = Table(
+        Tr(
+            Th("ID"),
+            Th("Repo URL"),
+            Th("Last Scan Date"),
+            Th("Scan Results"),
+        ),
+        id="repoScanTable",
+        *table_rows,
+    )
+
+    return Titled("Repo Scan Results", table)
+
 
 # Define the route to view a single `repo_scan_results` entry
 @rt("/repo_scan_results/{id}")
