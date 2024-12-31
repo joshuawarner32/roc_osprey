@@ -282,4 +282,4 @@ def get_repo_scan_result(id: int):
         return Titled("Error", P("Repo Scan Result not found"))
 
 # Serve the application
-serve()
+serve(host="127.0.0.1", port=9090)
