@@ -101,6 +101,9 @@ class Github:
                            url TEXT UNIQUE,
                            response TEXT,
                            timestamp DATETIME)''')
+        cursor.execute('''CREATE INDEX IF NOT EXISTS idx_url ON api_cache (url)''')
+        cursor.execute('''CREATE INDEX IF NOT EXISTS idx_timestamp_url ON api_cache (timestamp, url)''')
+        cursor.execute('''DELETE FROM api_cache WHERE timestamp < ?''', ((datetime.now() - timedelta(hours=48)).isoformat(),))
         self.conn.commit()
 
     def _is_cache_valid(self, timestamp):
