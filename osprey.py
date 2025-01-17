@@ -1,8 +1,8 @@
 import hashlib
+import random
 import sqlite3
 from datetime import datetime, timedelta
 import base64
-import os
 import time
 import threading
 from dotenv import load_dotenv
@@ -54,6 +54,16 @@ class Db:
             repo_urls = [row[0] for row in self.c.fetchall()]
         return repo_urls
 
+    def get_existing_users(self):
+        repo_urls = self.get_existing_repo_urls()
+        users = set()
+        for repo_url in repo_urls:
+            parsed_url = urlparse(repo_url)
+            assert parsed_url.netloc == 'github.com'
+            repo_owner = parsed_url.path.split('/')[1]
+            users.add(repo_owner)
+        return users
+
     def get_repo_scan_info(self, repo_url):
         with self.lock:
             self.c.execute('SELECT scan_date, scan_sha, scan_results FROM repo_scan_results WHERE repo_url=? ORDER BY scan_date DESC LIMIT 1', (repo_url,))
@@ -73,7 +83,8 @@ def create_db():
                   retrieval_date TEXT,
                   file_contents TEXT,
                   repo_url TEXT,
-                  file_path TEXT)''')
+                  file_path TEXT,
+                  valid_roc INTEGER)''')
     db.c.execute('''CREATE TABLE IF NOT EXISTS repo_scan_results
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   repo_url TEXT,
@@ -144,8 +155,12 @@ def should_scan_repo(last_scan_date, scan_results):
         return False
     return True
 
-def search_roc_files(github):
-    query = 'extension:roc -repo:roc-lang/roc'
+def search_roc_files(db, github):
+    # Grab up to 20 random, unique users from the database
+    users = db.get_existing_users()
+    random_users = random.sample(users, min(20, len(users)))
+    user_excludes = ' '.join([f'-user:{user}' for user in random_users])
+    query = f'extension:roc -repo:roc-lang/roc {user_excludes}'
     items = []
     page = 1
     while True:
@@ -161,8 +176,8 @@ def get_file_content(github, url):
     content = file_info['content']
     return base64.b64decode(content).decode('utf-8')
 
-def explore_via_search(db, github):
-    roc_files = search_roc_files(github)
+def explore_via_code_search(db, github):
+    roc_files = search_roc_files(db, github)
     for item in roc_files:
         file_url = item['url']
         commit_sha = item['sha']
@@ -174,6 +189,26 @@ def explore_via_search(db, github):
 
         db.add_file(file_hash, commit_sha, file_contents, repo_url, file_path)
         print(f"Stored file: {item['repository']['full_name']} {file_path}")
+
+def search_roc_repos(db, github):
+    users = db.get_existing_users()
+    random_users = random.sample(users, min(20, len(users)))
+    user_excludes = ' '.join([f'-user:{user}' for user in random_users])
+    query = f'roc language:Roc {user_excludes}'
+    items = []
+    page = 1
+    while True:
+        result = github.get(f'search/repositories?q={query}&per_page=100&page={page}')
+        items.extend(result['items'])
+        if 'next' not in result:
+            break
+        page += 1
+    return items
+
+def explore_via_repo_search(db, github):
+    items = search_roc_repos(db, github)
+    repo_urls = [item['html_url'] for item in items]
+    explore_repos(db, github, repo_urls)
 
 def explore_via_known_repos(db, github):
     repo_urls = db.get_existing_repo_urls()
@@ -217,10 +252,12 @@ def explore_via_known_users(db, github):
         try:
             parsed_url = urlparse(repo_url)
             assert parsed_url.netloc == 'github.com'
-            user = parsed_url.path.split('/')[1]
-            users.add(user)
+            repo_owner = parsed_url.path.split('/')[1]
+            # repo_name = parsed_url.path.split('/')[2]
+            users.add(repo_owner)
         except Exception as e:
             print(f"Error parsing repo URL {repo_url}: {e}")
+            continue
 
     repo_urls = set()
     print("Unique users from known repositories:")
@@ -247,7 +284,8 @@ def main():
     github = Github()
 
     try:
-        explore_via_search(db, github)
+        explore_via_code_search(db, github)
+        explore_via_repo_search(db, github)
         explore_via_known_repos(db, github)
         explore_via_known_users(db, github)
     finally:
