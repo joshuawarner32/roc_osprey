@@ -1,0 +1,8 @@
+[package]
+name = "debug_parse"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+annotate-snippets = { version = "0.11.5", features = ["testing-colors"] }
+bumpalo = { version = "3.16.0", features = ["collections"] }
