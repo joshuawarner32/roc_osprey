@@ -50,7 +50,7 @@ class Db:
 
     def get_existing_repo_urls(self):
         with self.lock:
-            self.c.execute('SELECT DISTINCT repo_url FROM roc_files')
+            self.c.execute('SELECT DISTINCT repo_url FROM roc_files WHERE hidden=0')
             repo_urls = [row[0] for row in self.c.fetchall()]
         return repo_urls
 
@@ -84,7 +84,13 @@ def create_db():
                   file_contents TEXT,
                   repo_url TEXT,
                   file_path TEXT,
-                  valid_roc INTEGER)''')
+                  hidden INTEGER DEFAULT 0)''')
+    db.c.execute('''PRAGMA table_info(roc_files)''')
+    columns = [row[1] for row in db.c.fetchall()]
+    if 'hidden' not in columns:
+        db.c.execute('''ALTER TABLE roc_files ADD COLUMN hidden INTEGER DEFAULT 0''')
+    db.c.execute('''CREATE INDEX IF NOT EXISTS idx_id ON roc_files (id)''')
+    db.c.execute('''CREATE INDEX IF NOT EXISTS idx_repo_url_file_path_file_hash ON roc_files (repo_url, file_path, file_hash)''')
     db.c.execute('''CREATE TABLE IF NOT EXISTS repo_scan_results
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   repo_url TEXT,
